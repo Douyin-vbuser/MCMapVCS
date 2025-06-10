@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+mainClassName = 'com.mapvcs.client.MapVCSClient'
+
+repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public/' }
+    maven { url = 'https://maven.aliyun.com/repository/central' }
+}
+
+dependencies {
+    implementation files("libs/mapvcs-core.jar")
+    implementation 'io.netty:netty-all:4.1.68.Final'
+    implementation 'com.google.code.gson:gson:2.8.9'
+    implementation 'org.apache.commons:commons-compress:1.26.0'
+    implementation 'commons-io:commons-io:2.14.0'
+    implementation 'info.picocli:picocli:4.6.3'
+    implementation 'org.apache.commons:commons-lang3:3.12.0'
+}
+
+run {
+    standardInput = System.in
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': mainClassName
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+group = 'com.mapvcs.client'
+version = '1.0-SNAPSHOT'

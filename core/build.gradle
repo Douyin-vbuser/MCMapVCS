@@ -1,0 +1,26 @@
+plugins {
+    id 'java-library'
+    id 'application'
+}
+
+repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public/' }
+    maven { url = 'https://maven.aliyun.com/repository/central' }
+}
+
+dependencies {
+    implementation 'io.netty:netty-all:4.1.68.Final'
+    implementation 'com.google.code.gson:gson:2.8.9'
+    implementation 'org.projectlombok:lombok:1.18.24'
+    annotationProcessor 'org.projectlombok:lombok:1.18.24'
+}
+
+jar {
+    archiveBaseName = 'mapvcs-core'
+    version = '1.0.0'
+
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

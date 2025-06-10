@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+mainClassName = 'com.mapvcs.server.MapVCServer'
+
+repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public/' }
+    maven { url = 'https://maven.aliyun.com/repository/central' }
+}
+
+
+dependencies {
+    implementation files("libs/mapvcs-core.jar")
+    implementation 'io.javalin:javalin:4.0.0'
+    implementation 'org.slf4j:slf4j-simple:1.7.36'
+    implementation 'org.xerial:sqlite-jdbc:3.41.2.2'
+    implementation 'commons-io:commons-io:2.14.0'
+}
+
+applicationDistribution.from("src/main/resources") {
+    into "resources"
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': mainClassName
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
