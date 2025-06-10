@@ -5,11 +5,13 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import java.io.File;
+import java.io.IOException;
 import java.util.concurrent.Callable;
 import java.util.*;
 
 import static com.mapvcs.core.MapVCSProtocol.*;
 
+@SuppressWarnings("unused")
 @Command(name = "mapvcs", mixinStandardHelpOptions = true, version = "MapVCS 1.0",
         description = "Minecraft Map Version Control System")
 public class MapVCClient implements Callable<Integer> {
@@ -30,14 +32,24 @@ public class MapVCClient implements Callable<Integer> {
         System.exit(exitCode);
     }
 
+    private void initService() throws Exception {
+        if (service == null) {
+            if (!worldDir.isDirectory() || !new File(worldDir, "level.dat").exists()) {
+                throw new IOException("Invalid Minecraft world directory. Missing level.dat file.");
+            }
+            service = new MapVCSService(serverAddress, worldDir, branch);
+        }
+    }
+
     @Override
     public Integer call() throws Exception {
+        initService();
         if (!worldDir.isDirectory() || !new File(worldDir, "level.dat").exists()) {
             System.err.println("Invalid Minecraft world directory");
             return 1;
         }
-
         service = new MapVCSService(serverAddress, worldDir, branch);
+
 
         System.out.println("MapVCS Client connected to " + serverAddress);
         System.out.println("World: " + worldDir.getAbsolutePath());
@@ -53,12 +65,11 @@ public class MapVCClient implements Callable<Integer> {
             @Option(names = {"-a", "--author"}, description = "Author name", required = true) String author
     ) {
         try {
-            // 确保是本地连接
+            initService();
             if (!service.isLocalConnection()) {
                 System.err.println("Push operations are only allowed from localhost");
                 return;
             }
-
             String commitId = service.pushChanges(message, author);
             System.out.println("Pushed successfully! Commit ID: " + commitId);
         } catch (Exception e) {
@@ -70,6 +81,7 @@ public class MapVCClient implements Callable<Integer> {
     @Command(name = "pull", description = "Pull updates from server")
     public void pull() {
         try {
+            initService();
             PullResult result = service.pullUpdates();
             if (result.hasUpdates()) {
                 System.out.println("Pulled successfully!");
@@ -80,7 +92,6 @@ public class MapVCClient implements Callable<Integer> {
             }
         } catch (Exception e) {
             System.err.println("Pull failed: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 
@@ -89,6 +100,7 @@ public class MapVCClient implements Callable<Integer> {
             @Option(names = {"-l", "--limit"}, description = "Number of commits to show", defaultValue = "10") int limit
     ) {
         try {
+            initService();
             List<Commit> commits = service.getCommitHistory(limit);
             System.out.println("Commit History:");
             for (Commit commit : commits) {
@@ -106,8 +118,11 @@ public class MapVCClient implements Callable<Integer> {
     @Command(name = "init", description = "Initialize new repository")
     public void init() {
         try {
+            initService();
+            System.out.println("Initializing repository in: " + worldDir.getAbsolutePath());
             service.initializeRepository();
             System.out.println("Repository initialized successfully");
+            System.out.println("Current commit ID: " + service.getCurrentCommitId());
         } catch (Exception e) {
             System.err.println("Initialization failed: " + e.getMessage());
         }

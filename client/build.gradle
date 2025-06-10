@@ -6,7 +6,7 @@ plugins {
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
 
-mainClassName = 'com.mapvcs.client.MapVCSClient'
+mainClassName = 'com.mapvcs.client.MapVCClient'
 
 repositories {
     maven { url = 'https://maven.aliyun.com/repository/public/' }

@@ -1,8 +1,8 @@
 package com.mapvcs.client;
 
-import com.mapvcs.core.*;
 import com.mapvcs.core.MapVCSProtocol.*;
 import java.io.*;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.zip.*;
 import org.apache.commons.io.*;
@@ -30,12 +30,18 @@ public class MapVCSService {
 
     public void initializeRepository() throws IOException {
         if (stateFile.exists()) {
-            throw new IOException("Repository already initialized");
+            throw new IOException("Repository already initialized. State file exists: " + stateFile.getAbsolutePath());
+        }
+
+        // 确保必要的目录结构存在
+        File snapshotsDir = new File(worldDir.getParentFile(), "snapshots");
+        if (!snapshotsDir.exists() && !snapshotsDir.mkdirs()) {
+            throw new IOException("Failed to create snapshots directory: " + snapshotsDir.getAbsolutePath());
         }
 
         // 创建初始提交
         Commit initialCommit = new Commit(
-                "INITIAL_COMMIT",
+                "INITIAL_" + UUID.randomUUID().toString().substring(0, 8),
                 branch,
                 null,
                 System.currentTimeMillis(),
@@ -43,15 +49,42 @@ public class MapVCSService {
                 "Initial repository"
         );
 
+        // 保存初始空快照
+        try {
+            byte[] emptySnapshot = createSnapshot(Collections.emptyMap());
+            saveCommitLocally(initialCommit, emptySnapshot);
+        } catch (Exception e) {
+            throw new IOException("Failed to create initial snapshot", e);
+        }
+
         // 保存状态
         saveState(initialCommit.getId());
+        currentCommitId = initialCommit.getId();
+
+        System.out.println("Repository initialized with commit ID: " + currentCommitId);
+    }
+
+    private void saveCommitLocally(Commit commit, byte[] snapshot) throws IOException {
+        File snapshotsDir = new File(worldDir.getParentFile(), "snapshots");
+        File snapshotFile = new File(snapshotsDir, commit.getId() + ".zip");
+
+        if (!snapshotsDir.exists() && !snapshotsDir.mkdirs()) {
+            throw new IOException("Failed to create directory: " + snapshotsDir.getAbsolutePath());
+        }
+
+        try {
+            FileUtils.writeByteArrayToFile(snapshotFile, snapshot);
+            System.out.println("Saved snapshot: " + snapshotFile.getAbsolutePath());
+        } catch (IOException e) {
+            throw new IOException("Failed to write snapshot file: " + snapshotFile.getAbsolutePath(), e);
+        }
     }
 
     private void loadState() {
         if (stateFile.exists()) {
             try {
                 Properties props = new Properties();
-                props.load(new FileInputStream(stateFile));
+                props.load(Files.newInputStream(stateFile.toPath()));
                 currentCommitId = props.getProperty("commitId");
             } catch (IOException e) {
                 currentCommitId = null;
@@ -62,7 +95,7 @@ public class MapVCSService {
     private void saveState(String commitId) {
         Properties props = new Properties();
         props.setProperty("commitId", commitId);
-        try (OutputStream out = new FileOutputStream(stateFile)) {
+        try (OutputStream out = Files.newOutputStream(stateFile.toPath())) {
             props.store(out, "MapVCS State");
         } catch (IOException e) {
             System.err.println("Failed to save state: " + e.getMessage());
@@ -70,10 +103,8 @@ public class MapVCSService {
     }
 
     public String pushChanges(String message, String author) throws Exception {
-        // 1. 计算差异
         Map<String, byte[]> changes = calculateChanges();
 
-        // 2. 创建提交对象
         Commit commit = new Commit(
                 UUID.randomUUID().toString(),
                 branch,
@@ -83,51 +114,77 @@ public class MapVCSService {
                 message
         );
 
-        // 3. 序列化快照
         byte[] snapshot = createSnapshot(changes);
 
-        // 4. 直接保存到本地存储（绕过网络）
         saveCommitLocally(commit, snapshot);
 
-        // 5. 更新本地状态
         currentCommitId = commit.getId();
         saveState(currentCommitId);
 
         return commit.getId();
     }
 
-    private void saveCommitLocally(Commit commit, byte[] snapshot) throws Exception {
-        // 在实际项目中，这里会连接到本地数据库
-        System.out.println("Saving commit locally: " + commit.getId());
-
-        // 保存快照到文件系统（简化实现）
-        File snapshotFile = new File(worldDir.getParentFile(), "snapshots/" + commit.getId() + ".zip");
-        FileUtils.writeByteArrayToFile(snapshotFile, snapshot);
+    private byte[] mergeChunk(byte[] base, byte[] local, byte[] remote) {
+        return (local != null) ? local : remote;
     }
 
     public PullResult pullUpdates() throws Exception {
         PullResult result = client.pull(branch, currentCommitId);
 
         if (result.hasUpdates()) {
-            List<String> updatedFiles = applyChanges(result.getSnapshot());
+            Map<String, byte[]> localChanges = calculateChanges();
+            byte[] baseSnapshot = getLocalSnapshot(currentCommitId);
+            Map<String, byte[]> remoteChanges = extractSnapshot(result.getSnapshot());
 
-            PullResult fullResult = new PullResult(
+            Map<String, byte[]> merged = new HashMap<>();
+            for (String file : remoteChanges.keySet()) {
+                byte[] base = extractFile(baseSnapshot, file);
+                byte[] local = localChanges.get(file);
+                byte[] remote = remoteChanges.get(file);
+
+                merged.put(file, mergeChunk(base, local, remote));
+            }
+
+            List<String> updatedFiles = applyChanges(createSnapshot(merged));
+            currentCommitId = result.getNewCommitId();
+            saveState(currentCommitId);
+
+            return new PullResult(
                     result.getNewCommitId(),
                     result.getSnapshot(),
                     updatedFiles
             );
-
-            currentCommitId = fullResult.getNewCommitId();
-            saveState(currentCommitId);
-
-            return fullResult;
         }
 
-        return new PullResult(
-                result.getNewCommitId(),
-                null,
-                Collections.emptyList()
-        );
+        return result;
+    }
+
+    private byte[] getLocalSnapshot(String commitId) throws IOException {
+        File snapshotFile = new File(worldDir.getParentFile(), "snapshots/" + commitId + ".zip");
+        return FileUtils.readFileToByteArray(snapshotFile);
+    }
+
+    private byte[] extractFile(byte[] snapshot, String fileName) throws IOException {
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(snapshot))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (fileName.equals(entry.getName())) {
+                    return IOUtils.toByteArray(zis);
+                }
+            }
+        }
+        return null;
+    }
+
+    private Map<String, byte[]> extractSnapshot(byte[] snapshot) throws IOException {
+        Map<String, byte[]> files = new HashMap<>();
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(snapshot))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                files.put(entry.getName(), IOUtils.toByteArray(zis));
+            }
+        }
+        return files;
     }
 
     private Map<String, byte[]> calculateChanges() throws IOException {
@@ -135,7 +192,7 @@ public class MapVCSService {
 
         File regionDir = new File(worldDir, "region");
         if (regionDir.exists()) {
-            for (File regionFile : regionDir.listFiles((dir, name) -> name.endsWith(".mca"))) {
+            for (File regionFile : Objects.requireNonNull(regionDir.listFiles((dir, name) -> name.endsWith(".mca")))) {
                 byte[] currentData = FileUtils.readFileToByteArray(regionFile);
                 changes.put("region/" + regionFile.getName(), currentData);
             }

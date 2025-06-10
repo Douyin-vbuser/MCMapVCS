@@ -70,14 +70,14 @@ public class MapVCServer {
             });
         }).start(HTTP_PORT);
 
-        app.get("/api/history/:branch", ctx -> {
+        app.get("/api/history/{branch}", ctx -> {
             String branch = ctx.pathParam("branch");
             int limit = ctx.queryParamAsClass("limit", Integer.class).getOrDefault(10);
             List<Commit> commits = repo.getCommitHistory(branch, limit);
             ctx.json(commits);
         });
 
-        app.get("/api/snapshot/:commitId", ctx -> {
+        app.get("/api/snapshot/{commitId}", ctx -> {
             String commitId = ctx.pathParam("commitId");
             byte[] snapshot = repo.getSnapshot(commitId);
             if (snapshot == null) ctx.status(404);
